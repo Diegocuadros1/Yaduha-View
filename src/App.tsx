@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import './App.css';
-import { parseLogData, getUniqueValues, getTotalTokens, getResponseTime } from './data/logData';
+import { logFiles, logFileNames, parseRawData, getUniqueValues, getTotalTokens, getResponseTime } from './data/logData';
 import type { Filters, SortField, SortDirection } from './types';
 import FiltersPanel from './components/Filters';
 import EventCard from './components/EventCard';
@@ -8,8 +8,11 @@ import Charts from './components/Charts';
 
 type ViewTab = 'events' | 'charts' | 'toolchains';
 
+const DEFAULT_FILE = logFileNames.includes('test-1.3.jsonl') ? 'test-1.3.jsonl' : logFileNames[0];
+
 function App() {
-  const allEvents = useMemo(() => parseLogData(), []);
+  const [selectedFile, setSelectedFile] = useState<string>(DEFAULT_FILE);
+  const allEvents = useMemo(() => parseRawData(logFiles[selectedFile]), [selectedFile]);
 
   const [filters, setFilters] = useState<Filters>({
     tools: [],
@@ -22,6 +25,11 @@ function App() {
   const [sortField, setSortField] = useState<SortField>('lineNumber');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [activeTab, setActiveTab] = useState<ViewTab>('events');
+
+  function handleFileChange(file: string) {
+    setSelectedFile(file);
+    setFilters({ tools: [], events: [], models: [], toolchains: [], functionality: [], searchText: '' });
+  }
 
   const availableTools = useMemo(() => getUniqueValues(allEvents, 'TOOL'), [allEvents]);
   const availableEvents = useMemo(() => getUniqueValues(allEvents, 'event'), [allEvents]);
@@ -99,6 +107,18 @@ function App() {
       <header className="app-header">
         <h1>Yaduha Log Viewer</h1>
         <p className="app-subtitle">Translation Pipeline Event Logger</p>
+        <div className="file-selector">
+          <span className="file-selector-label">Dataset:</span>
+          {logFileNames.map(name => (
+            <button
+              key={name}
+              className={`file-btn ${selectedFile === name ? 'active' : ''}`}
+              onClick={() => handleFileChange(name)}
+            >
+              {name.replace('.jsonl', '')}
+            </button>
+          ))}
+        </div>
         <nav className="tab-nav">
           <button
             className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}

@@ -1,7 +1,18 @@
-import rawData from '../../data/test-1.3.jsonl?raw';
 import type { LogEvent } from '../types';
 
-export function parseLogData(): LogEvent[] {
+// Eagerly import all JSONL files as raw text
+const rawFiles = import.meta.glob('../../data/*.jsonl', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
+// Build a sorted map of filename -> raw content
+export const logFiles: Record<string, string> = {};
+for (const [path, raw] of Object.entries(rawFiles)) {
+  const name = path.split('/').pop()!;
+  logFiles[name] = raw;
+}
+
+export const logFileNames = Object.keys(logFiles).sort();
+
+export function parseRawData(rawData: string): LogEvent[] {
   const lines = rawData.trim().split('\n');
   return lines.map((line, index) => {
     const parsed = JSON.parse(line) as LogEvent;
@@ -70,7 +81,7 @@ export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
       events: evts,
       agent_model: completionEvent?.agent_model as string | undefined,
       source: completionEvent?.source as string | undefined,
-      back_translation: completionEvent?.source as string | undefined,
+      back_translation: completionEvent?.back_translation_result as string | undefined,
       finalResponse: completionEvent?.response as string | undefined,
       totalTime: completionEvent?.translation_time as number | undefined ?? totalTime,
       totalTokens,
