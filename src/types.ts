@@ -1,7 +1,7 @@
 export interface LogEvent {
   lineNumber: number;
   TOOL: string;
-  TOOLCHAIN: string;
+  TOOLCHAIN?: string;
   event: string;
   agent_model?: string;
   agent_name?: string;

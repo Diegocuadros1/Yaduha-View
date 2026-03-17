@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { LogEvent } from '../types';
 import { getTotalTokens, getResponseTime, groupByToolchain } from '../data/logData';
 
@@ -69,7 +70,7 @@ function DonutChart({
     return { x: center + r * Math.cos(rad), y: center + r * Math.sin(rad) };
   }
 
-  function describeArc(startAngle: number, endAngle: number, r: number, ir: number) {
+  function describeArc(startAngle: number, endAngle: number, r: number, ir: number): string {
     const span = endAngle - startAngle;
     if (span >= 359.99) {
       const mid = startAngle + 180;
@@ -96,8 +97,8 @@ function DonutChart({
       <h3>{title}</h3>
       <div className="donut-container">
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {segments.map((seg, i) => (
-            <path key={i} d={describeArc(seg.start, seg.end, radius, innerRadius)} fill={seg.color} />
+          {segments.map((seg) => (
+            <path key={seg.label} d={describeArc(seg.start, seg.end, radius, innerRadius)} fill={seg.color} />
           ))}
           <text x={center} y={center} textAnchor="middle" dominantBaseline="middle" className="donut-center-text">
             {total}
@@ -149,7 +150,62 @@ const MODEL_COLORS: Record<string, string> = {
   'gpt-4o-mini': '#f59e0b',
 };
 
+const TEXT_FIELDS: (keyof LogEvent)[] = ['source', 'sentence', 'content', 'parsed', 'response', 'back_translation_result'];
+
+function PipelineEventRow({ event }: { event: LogEvent }) {
+  const [open, setOpen] = useState(false);
+  const rt = getResponseTime(event);
+  const tokens = getTotalTokens(event);
+
+  const textEntries = TEXT_FIELDS
+    .map(f => [f, event[f]] as [string, unknown])
+    .filter(([, v]) => v !== undefined && v !== null && v !== '');
+
+  return (
+    <div className={`pipeline-event${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}>
+      <div className="pipeline-event-row">
+        <span
+          className="pipeline-event-dot"
+          style={{ background: EVENT_COLORS[event.event] ?? '#6b7280' }}
+        />
+        <span className="pipeline-event-type">{event.event}</span>
+        <span className="pipeline-event-tool">{event.TOOL}</span>
+        {event.agent_model && <span className="pipeline-event-chip model">{event.agent_model}</span>}
+        {rt !== null && <span className="pipeline-event-chip time">{rt.toFixed(2)}s</span>}
+        {tokens > 0 && <span className="pipeline-event-chip tokens">{tokens.toLocaleString()} tok</span>}
+        <span className="pipeline-event-line">#{event.lineNumber}</span>
+        <span className="pipeline-expand-icon">{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div className="pipeline-event-detail" onClick={e => e.stopPropagation()}>
+          {event.functionality && (
+            <div className="pipeline-detail-row">
+              <span className="pipeline-detail-label">functionality</span>
+              <span className="pipeline-detail-value">{event.functionality}</span>
+            </div>
+          )}
+          {event.api_call_index !== undefined && (
+            <div className="pipeline-detail-row">
+              <span className="pipeline-detail-label">api call</span>
+              <span className="pipeline-detail-value">{event.api_call_index} / {event.api_calls}</span>
+            </div>
+          )}
+          {textEntries.map(([field, val]) => (
+            <div key={field} className="pipeline-detail-block">
+              <span className="pipeline-detail-block-label">{field}</span>
+              <pre className="pipeline-detail-block-value">
+                {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Charts({ events }: { events: LogEvent[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const toolchainGroups = groupByToolchain(events);
 
   // Event type distribution
@@ -247,38 +303,64 @@ export default function Charts({ events }: { events: LogEvent[] }) {
       {toolchainGroups.length > 0 && (
         <div className="chart-card toolchain-summary">
           <h3>Toolchain Pipelines</h3>
-          {toolchainGroups.map(group => (
-            <div key={group.toolchainId} className="toolchain-row">
-              <div className="toolchain-header">
-                {/* <span className="toolchain-id">{group.toolchainId.slice(0, 8)}...</span> */}
-                <span className="toolchain-id">{group.agent_model}</span>
-                {group.source && (
-                  <span className="toolchain-source">Source: "{group.source}"</span>
+          {toolchainGroups.map(group => {
+            const isExpanded = expandedId === group.toolchainId;
+            return (
+              <div key={group.toolchainId} className={`toolchain-row${isExpanded ? ' expanded' : ''}`}>
+                <div
+                  className="toolchain-row-header"
+                  onClick={() => setExpandedId(isExpanded ? null : group.toolchainId)}
+                >
+                  <div className="toolchain-header">
+                    <span className="toolchain-id">{group.agent_model}</span>
+                    {group.source && (
+                      <span className="toolchain-source">"{group.source}"</span>
+                    )}
+                  </div>
+                  <div className="toolchain-meta">
+                    <span>{group.events.length} events</span>
+                    {group.totalTime && <span>{group.totalTime.toFixed(2)}s</span>}
+                    {group.totalTokens > 0 && <span>{group.totalTokens.toLocaleString()} tok</span>}
+                  </div>
+                  <div className="toolchain-timeline">
+                    {group.events.map(e => (
+                      <div
+                        key={e.lineNumber}
+                        className="timeline-dot"
+                        style={{ background: EVENT_COLORS[e.event] ?? '#6b7280' }}
+                        title={`#${e.lineNumber}: ${e.event}`}
+                      />
+                    ))}
+                  </div>
+                  <span className="toolchain-expand-icon">{isExpanded ? '▲' : '▼'}</span>
+                </div>
+
+                {isExpanded && (
+                  <div className="toolchain-expanded">
+                    {group.finalResponse && (
+                      <div className="toolchain-expanded-response">
+                        <span className="pipeline-detail-label">final response</span>
+                        <div className="toolchain-response">{group.finalResponse}</div>
+                        {group.back_translation && (
+                          <>
+                            <span className="pipeline-detail-label" style={{ marginTop: 6 }}>back translation</span>
+                            <div className="toolchain-response" style={{ color: 'var(--cyan)' }}>
+                              {group.back_translation}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <div className="pipeline-events-list">
+                      {[...group.events]
+                        .sort((a, b) => a.lineNumber - b.lineNumber)
+                        .map(e => <PipelineEventRow key={e.lineNumber} event={e} />)}
+                    </div>
+                  </div>
                 )}
-                {group.back_translation && (
-                  <span className="toolchain-source">Back Translation: "{group.back_translation}"</span>
-                )}
               </div>
-              {group.finalResponse && (
-                <div className="toolchain-response">{group.finalResponse}</div>
-              )}
-              <div className="toolchain-meta">
-                <span>{group.events.length} events</span>
-                {group.totalTime && <span>{group.totalTime.toFixed(2)}s</span>}
-                {group.totalTokens > 0 && <span>{group.totalTokens.toLocaleString()} tokens</span>}
-              </div>
-              <div className="toolchain-timeline">
-                {group.events.map(e => (
-                  <div
-                    key={e.lineNumber}
-                    className="timeline-dot"
-                    style={{ background: EVENT_COLORS[e.event] ?? '#6b7280' }}
-                    title={`#${e.lineNumber}: ${e.event}`}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

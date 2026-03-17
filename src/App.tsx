@@ -1,18 +1,82 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import './App.css';
-import { logFiles, logFileNames, parseRawData, getUniqueValues, getTotalTokens, getResponseTime } from './data/logData';
+import { parseRawData, getUniqueValues, getTotalTokens, getResponseTime } from './data/logData';
 import type { Filters, SortField, SortDirection } from './types';
 import FiltersPanel from './components/Filters';
 import EventCard from './components/EventCard';
 import Charts from './components/Charts';
+import RunExperiment from './components/RunExperiment';
 
-type ViewTab = 'events' | 'charts' | 'toolchains';
+type ViewTab = 'events' | 'charts' | 'experiment';
 
-const DEFAULT_FILE = logFileNames.includes('test-1.3.jsonl') ? 'test-1.3.jsonl' : logFileNames[0];
+interface ApiFile {
+  name: string;
+  content: string;
+}
+
+const DEFAULT_API_URL = 'http://localhost:8000';
 
 function App() {
-  const [selectedFile, setSelectedFile] = useState<string>(DEFAULT_FILE);
-  const allEvents = useMemo(() => parseRawData(logFiles[selectedFile]), [selectedFile]);
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
+  const [apiFiles, setApiFiles] = useState<ApiFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>('');
+  const [apiStatus, setApiStatus] = useState<'loading' | 'ok' | 'error'>('loading');
+
+  const allFileNames = useMemo(
+    () => apiFiles.map(f => f.name).sort(),
+    [apiFiles],
+  );
+
+  // Auto-load all log files from the API whenever the API URL changes
+  const loadFromApi = useCallback(async (url: string) => {
+    setApiStatus('loading');
+    try {
+      const listRes = await fetch(`${url}/api/experiments/logs`);
+      if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`);
+      const { files } = await listRes.json() as { files: string[] };
+
+      const loaded: ApiFile[] = await Promise.all(
+        files.map(async (filename) => {
+          const res = await fetch(`${url}/api/experiments/logs/${filename}`);
+          const content = res.ok ? await res.text() : '';
+          return { name: filename, content };
+        })
+      );
+
+      setApiFiles(loaded);
+      setSelectedFile(prev => loaded.some(f => f.name === prev) ? prev : (loaded[0]?.name ?? ''));
+      setApiStatus('ok');
+    } catch {
+      setApiStatus('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFromApi(apiUrl);
+  }, [apiUrl, loadFromApi]);
+
+  function getFileContent(name: string): string {
+    return apiFiles.find(f => f.name === name)?.content ?? '';
+  }
+
+  function handleLogLoaded(filename: string, content: string) {
+    setApiFiles(prev => {
+      const without = prev.filter(f => f.name !== filename);
+      return [{ name: filename, content }, ...without];
+    });
+    setSelectedFile(filename);
+    setActiveTab('charts');
+  }
+
+  const allEvents = useMemo(
+    () => {
+      const content = getFileContent(selectedFile);
+      if (!content) return [];
+      return parseRawData(content);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedFile, apiFiles],
+  );
 
   const [filters, setFilters] = useState<Filters>({
     tools: [],
@@ -38,7 +102,7 @@ function App() {
   const availableToolchains = useMemo(() => {
     const tcs = new Set<string>();
     for (const e of allEvents) {
-      tcs.add(e.TOOLCHAIN.split('/')[0]);
+      if (e.TOOLCHAIN) tcs.add(e.TOOLCHAIN.split('/')[0]);
     }
     return Array.from(tcs).sort();
   }, [allEvents]);
@@ -57,8 +121,8 @@ function App() {
     }
     if (filters.toolchains.length > 0) {
       result = result.filter(e => {
-        const rootTc = e.TOOLCHAIN.split('/')[0];
-        return filters.toolchains.includes(rootTc);
+        const rootTc = e.TOOLCHAIN?.split('/')[0];
+        return rootTc !== undefined && filters.toolchains.includes(rootTc);
       });
     }
     if (filters.functionality.length > 0) {
@@ -102,23 +166,38 @@ function App() {
     return sorted;
   }, [filteredEvents, sortField, sortDirection]);
 
+  const showSidebar = activeTab === 'events' || activeTab === 'charts';
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Yaduha Log Viewer</h1>
-        <p className="app-subtitle">Translation Pipeline Event Logger</p>
-        <div className="file-selector">
-          <span className="file-selector-label">Dataset:</span>
-          {logFileNames.map(name => (
-            <button
-              key={name}
-              className={`file-btn ${selectedFile === name ? 'active' : ''}`}
-              onClick={() => handleFileChange(name)}
-            >
-              {name.replace('.jsonl', '')}
-            </button>
-          ))}
+        <div className="app-header-top">
+          <div>
+            <h1>Yaduha Log Viewer</h1>
+            <p className="app-subtitle">Translation Pipeline Event Logger</p>
+          </div>
+          <span className={`api-status api-status-${apiStatus}`}>
+            {apiStatus === 'loading' && '⏳ connecting…'}
+            {apiStatus === 'ok' && `✓ ${allFileNames.length} file${allFileNames.length !== 1 ? 's' : ''}`}
+            {apiStatus === 'error' && '✗ API offline'}
+          </span>
         </div>
+
+        {allFileNames.length > 0 && activeTab !== 'experiment' && (
+          <div className="file-selector">
+            <span className="file-selector-label">Dataset:</span>
+            {allFileNames.map(name => (
+              <button
+                key={name}
+                className={`file-btn ${selectedFile === name ? 'active' : ''}`}
+                onClick={() => handleFileChange(name)}
+              >
+                {name.replace('.jsonl', '')}
+              </button>
+            ))}
+          </div>
+        )}
+
         <nav className="tab-nav">
           <button
             className={`tab-btn ${activeTab === 'events' ? 'active' : ''}`}
@@ -130,29 +209,49 @@ function App() {
             className={`tab-btn ${activeTab === 'charts' ? 'active' : ''}`}
             onClick={() => setActiveTab('charts')}
           >
-            Charts & Analytics
+            Charts &amp; Analytics
+          </button>
+          <button
+            className={`tab-btn tab-btn-accent ${activeTab === 'experiment' ? 'active' : ''}`}
+            onClick={() => setActiveTab('experiment')}
+          >
+            Run Experiment
           </button>
         </nav>
+
+        {activeTab === 'experiment' && (
+          <div className="api-url-row">
+            <label className="api-url-label">API URL</label>
+            <input
+              className="api-url-input"
+              value={apiUrl}
+              onChange={e => setApiUrl(e.target.value)}
+              placeholder="http://localhost:8000"
+            />
+          </div>
+        )}
       </header>
 
       <div className="app-body">
-        <FiltersPanel
-          filters={filters}
-          onFiltersChange={setFilters}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          onSortChange={(field, dir) => {
-            setSortField(field);
-            setSortDirection(dir);
-          }}
-          availableTools={availableTools}
-          availableEvents={availableEvents}
-          availableModels={availableModels}
-          availableToolchains={availableToolchains}
-          availableFunctionality={availableFunctionality}
-          totalCount={allEvents.length}
-          filteredCount={filteredEvents.length}
-        />
+        {showSidebar && (
+          <FiltersPanel
+            filters={filters}
+            onFiltersChange={setFilters}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortChange={(field, dir) => {
+              setSortField(field);
+              setSortDirection(dir);
+            }}
+            availableTools={availableTools}
+            availableEvents={availableEvents}
+            availableModels={availableModels}
+            availableToolchains={availableToolchains}
+            availableFunctionality={availableFunctionality}
+            totalCount={allEvents.length}
+            filteredCount={filteredEvents.length}
+          />
+        )}
 
         <main className="main-content">
           {activeTab === 'events' && (
@@ -167,6 +266,10 @@ function App() {
           )}
 
           {activeTab === 'charts' && <Charts events={filteredEvents} />}
+
+          {activeTab === 'experiment' && (
+            <RunExperiment apiUrl={apiUrl} onLogLoaded={handleLogLoaded} />
+          )}
         </main>
       </div>
     </div>

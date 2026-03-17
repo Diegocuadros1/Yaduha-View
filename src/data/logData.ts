@@ -1,19 +1,12 @@
 import type { LogEvent } from '../types';
 
-// Eagerly import all JSONL files as raw text
-const rawFiles = import.meta.glob('../../data/*.jsonl', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
-
-// Build a sorted map of filename -> raw content
+// Static bundled files are no longer used; logs are loaded from the API at runtime.
 export const logFiles: Record<string, string> = {};
-for (const [path, raw] of Object.entries(rawFiles)) {
-  const name = path.split('/').pop()!;
-  logFiles[name] = raw;
-}
-
-export const logFileNames = Object.keys(logFiles).sort();
+export const logFileNames: string[] = [];
 
 export function parseRawData(rawData: string): LogEvent[] {
-  const lines = rawData.trim().split('\n');
+  if (!rawData || !rawData.trim()) return [];
+  const lines = rawData.trim().split('\n').filter(l => l.trim());
   return lines.map((line, index) => {
     const parsed = JSON.parse(line) as LogEvent;
     parsed.lineNumber = index + 1;
@@ -59,7 +52,7 @@ export interface ToolchainGroup {
 export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
   const groups = new Map<string, LogEvent[]>();
   for (const event of events) {
-    const tcParts = event.TOOLCHAIN.split('/');
+    const tcParts = (event.TOOLCHAIN ?? 'unknown').split('/');
     const rootTc = tcParts[0];
     if (!groups.has(rootTc)) {
       groups.set(rootTc, []);
@@ -68,7 +61,9 @@ export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
   }
 
   return Array.from(groups.entries()).map(([toolchainId, evts]) => {
-    const completionEvent = evts.find(e => e.event === 'translation_completed');
+    const completionEvent =
+      evts.find(e => e.event === 'translation_completed') ??
+      evts.find(e => e.event === 'translation_complete');
     let totalTokens = 0;
     let totalTime = 0;
     for (const e of evts) {
@@ -83,7 +78,7 @@ export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
       source: completionEvent?.source as string | undefined,
       back_translation: completionEvent?.back_translation_result as string | undefined,
       finalResponse: completionEvent?.response as string | undefined,
-      totalTime: completionEvent?.translation_time as number | undefined ?? totalTime,
+      totalTime: (completionEvent?.translation_time as number | undefined) ?? totalTime,
       totalTokens,
     };
   });

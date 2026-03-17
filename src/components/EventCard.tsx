@@ -34,7 +34,7 @@ function formatJson(obj: unknown): string {
 export default function EventCard({ event }: { event: LogEvent }) {
   const [expanded, setExpanded] = useState(false);
   const color = EVENT_COLORS[event.event] ?? '#6b7280';
-  const icon = TOOL_ICONS[event.TOOL] ?? event.TOOL.slice(0, 4).toUpperCase();
+  const icon = TOOL_ICONS[event.TOOL] ?? (event.TOOL?.slice(0, 4) ?? '??').toUpperCase();
   const totalTokens = getTotalTokens(event);
   const responseTime = getResponseTime(event);
 
