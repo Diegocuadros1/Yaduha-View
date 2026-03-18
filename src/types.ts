@@ -16,6 +16,9 @@ export interface LogEvent {
   content?: string;
   sentence?: string;
   source?: string;
+  target?: string;
+  evaluations?: Record<string, number>;
+  SENTENCE_TYPE?: string;
   response_time?: number;
   prompt_tokens?: number;
   completion_tokens?: number;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { LogEvent } from '../types';
 import { getTotalTokens, getResponseTime, groupByToolchain } from '../data/logData';
 
@@ -204,6 +204,77 @@ function PipelineEventRow({ event }: { event: LogEvent }) {
   );
 }
 
+function EvaluationChart({ toolchainGroups }: { toolchainGroups: ReturnType<typeof groupByToolchain> }) {
+  const models = [...new Set(
+    toolchainGroups.filter(g => g.evaluation !== undefined).map(g => g.agent_model ?? 'unknown')
+  )];
+  const [selectedModel, setSelectedModel] = useState(models[0] ?? '');
+  useEffect(() => {
+    if (models.length > 0 && !models.includes(selectedModel)) setSelectedModel(models[0]);
+  }, [models.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (models.length === 0) return null;
+
+  const byType = new Map<string, number[]>();
+  for (const g of toolchainGroups.filter(g => (g.agent_model ?? 'unknown') === selectedModel && g.evaluation !== undefined)) {
+    const key = g.sentenceType ?? 'sentence';
+    if (!byType.has(key)) byType.set(key, []);
+    byType.get(key)!.push(g.evaluation!);
+  }
+  const data = Array.from(byType.entries()).map(([label, scores]) => ({
+    label,
+    value: scores.reduce((a, b) => a + b, 0) / scores.length,
+  }));
+  if (data.length === 0) return null;
+
+  const evalName = toolchainGroups.find(g => g.evaluationName)?.evaluationName ?? 'evaluation';
+
+  return (
+    <div className="chart-card">
+      <div className="eval-chart-header">
+        <div>
+          <h3>Evaluation by Sentence Type</h3>
+          <div className="eval-sub-label">{evalName}</div>
+        </div>
+        {models.length > 1 && (
+          <div className="toggle-group">
+            {models.map(m => (
+              <button
+                key={m}
+                className={`toggle-btn ${selectedModel === m ? 'active' : ''}`}
+                onClick={() => setSelectedModel(m)}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="vbar-chart-wrapper">
+        <div className="vbar-y-axis">
+          {[1.0, 0.75, 0.5, 0.25, 0.0].map(v => (
+            <span key={v} className="vbar-y-label">{v.toFixed(2)}</span>
+          ))}
+        </div>
+        <div className="vbar-chart-area">
+          {[0.25, 0.5, 0.75, 1.0].map(v => (
+            <div key={v} className="vbar-grid-line" style={{ bottom: `${v * 100}%` }} />
+          ))}
+          <div className="vbar-bars">
+            {data.map(d => (
+              <div key={d.label} className="vbar-col">
+                <span className="vbar-value">{d.value.toFixed(3)}</span>
+                <div className="vbar-fill" style={{ height: `${Math.max(d.value, 0) * 100}%` }} />
+                <span className="vbar-label">{d.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Charts({ events }: { events: LogEvent[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const toolchainGroups = groupByToolchain(events);
@@ -316,8 +387,16 @@ export default function Charts({ events }: { events: LogEvent[] }) {
                     {group.source && (
                       <span className="toolchain-source">"{group.source}"</span>
                     )}
+                    {group.target && (
+                      <span className="toolchain-source">→ "{group.target}"</span>
+                    )}
                   </div>
                   <div className="toolchain-meta">
+                    {group.evaluation !== undefined && (
+                      <span className="toolchain-eval">
+                        eval: {group.evaluation.toFixed(3)}
+                      </span>
+                    )}
                     <span>{group.events.length} events</span>
                     {group.totalTime && <span>{group.totalTime.toFixed(2)}s</span>}
                     {group.totalTokens > 0 && <span>{group.totalTokens.toLocaleString()} tok</span>}
@@ -363,6 +442,8 @@ export default function Charts({ events }: { events: LogEvent[] }) {
           })}
         </div>
       )}
+
+      <EvaluationChart toolchainGroups={toolchainGroups} />
 
       <div className="charts-grid">
         <DonutChart data={eventDistribution} title="Event Distribution" />

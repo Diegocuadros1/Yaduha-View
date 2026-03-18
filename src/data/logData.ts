@@ -43,10 +43,14 @@ export interface ToolchainGroup {
   agent_model?: string;
   events: LogEvent[];
   source?: string;
+  target?: string;
   back_translation?: string;
   finalResponse?: string;
   totalTime?: number;
   totalTokens: number;
+  evaluation?: number;
+  evaluationName?: string;
+  sentenceType?: string;
 }
 
 export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
@@ -76,10 +80,20 @@ export function groupByToolchain(events: LogEvent[]): ToolchainGroup[] {
       events: evts,
       agent_model: completionEvent?.agent_model as string | undefined,
       source: completionEvent?.source as string | undefined,
+      target: completionEvent?.target as string | undefined,
       back_translation: completionEvent?.back_translation_result as string | undefined,
       finalResponse: completionEvent?.response as string | undefined,
       totalTime: (completionEvent?.translation_time as number | undefined) ?? totalTime,
       totalTokens,
+      ...(() => {
+        const evals = completionEvent?.evaluations;
+        if (!evals || typeof evals !== 'object') return {};
+        const entries = Object.entries(evals as Record<string, number>);
+        if (entries.length === 0) return {};
+        const [name, score] = entries[0];
+        return { evaluationName: name, evaluation: score };
+      })(),
+      sentenceType: completionEvent?.SENTENCE_TYPE as string | undefined,
     };
   });
 }

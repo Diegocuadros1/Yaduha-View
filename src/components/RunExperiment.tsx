@@ -56,12 +56,11 @@ type Provider = (typeof PROVIDERS)[number];
 
 const DEFAULT_MODELS: Record<Provider, string> = {
   openai: 'gpt-4o-mini',
-  anthropic: 'claude-haiku-4-5-20251001',
+  anthropic: 'claude-sonnet-4-5',
   gemini: 'gemini-2.0-flash',
   ollama: 'llama3',
 };
 
-const SENTENCE_TYPES = ['', 'simple', 'transitive', 'intransitive', 'complex'];
 
 // ── Small reusable sub-components ─────────────────────────────────────────────
 
@@ -87,8 +86,8 @@ function SentenceRow({
         onChange={e => onChange({ ...sentence, text: e.target.value })}
         placeholder="Enter an English sentence…"
       />
-      <select
-        className="field-select sentence-type-select"
+      <input
+        className="field-input sentence-type-input"
         value={sentence.metadata.sentence_type ?? ''}
         onChange={e =>
           onChange({
@@ -96,13 +95,8 @@ function SentenceRow({
             metadata: { ...sentence.metadata, sentence_type: e.target.value },
           })
         }
-      >
-        {SENTENCE_TYPES.map(t => (
-          <option key={t} value={t}>
-            {t === '' ? '— type —' : t}
-          </option>
-        ))}
-      </select>
+        placeholder="type (optional)"
+      />
       {canRemove && (
         <button className="icon-btn remove-btn" onClick={onRemove} title="Remove sentence">
           ✕
